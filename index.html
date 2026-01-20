@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Accountant's Vault: Double Entry Escape</title>
+    
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Roboto:wght@300;400;700&display=swap');
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #111827; /* Gray 900 */
+            color: #e5e7eb; /* Gray 200 */
+        }
+        
+        .mono-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Animation for shaking on wrong answer */
+        .shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+
+        /* Scanline effect for "Screen" feel */
+        .scanlines {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.1) 50%,
+                rgba(0,0,0,0.1)
+            );
+            background-size: 100% 4px;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- GAME DATA ---
+        // This is the content you can edit to change questions
+        const gameLevels = [
+            {
+                id: 1,
+                title: "Security Clearance: Classification",
+                story: "You are trapped in the Chief Financial Officer's office. To power up the door release, you must correctly classify the nature of these accounts. The system only accepts the truth.",
+                question: "Which of the following accounts is classified as a LIABILITY?",
+                options: [
+                    { text: "Inventory", isCorrect: false, feedback: "Incorrect. Inventory is an Asset (Current Asset)." },
+                    { text: "Bank Overdraft", isCorrect: true, feedback: "Correct! You owe money to the bank." },
+                    { text: "Sales Revenue", isCorrect: false, feedback: "Incorrect. Sales is an Income account." },
+                    { text: "Drawings", isCorrect: false, feedback: "Incorrect. Drawings is a contra-equity account." }
+                ],
+                hint: "Think about what the business OWES to outsiders."
+            },
+            {
+                id: 2,
+                title: "The Logic Circuit: Golden Rules",
+                story: "The door is powered, but locked. The keypad requires the fundamental law of double entry to proceed.",
+                question: "To INCREASE an Expense account, you must __________ it. To DECREASE an Asset account, you must __________ it.",
+                options: [
+                    { text: "Debit; Debit", isCorrect: false, feedback: "Wrong. Assets increase on the Debit side." },
+                    { text: "Credit; Debit", isCorrect: false, feedback: "Wrong. Expenses increase on the Debit side." },
+                    { text: "Debit; Credit", isCorrect: true, feedback: "Access Granted. Expenses are Debited to increase; Assets are Credited to decrease." },
+                    { text: "Credit; Credit", isCorrect: false, feedback: "Wrong. Check your ALICE acronym." }
+                ],
+                hint: "Remember ALICE. Assets & Expenses follow the same rule. Liabilities, Income & Capital follow the opposite."
+            },
+            {
+                id: 3,
+                title: "Transaction Terminal: Purchase of Assets",
+                story: "You've reached the inner vault. A transaction log is flashing red. It needs to be recorded correctly to clear the error.",
+                question: "Transaction: Bought a motor vehicle for business use by cheque, $50,000.",
+                options: [
+                    { text: "Dr Motor Vehicles $50,000; Cr Cash in Hand $50,000", isCorrect: false, feedback: "Close, but 'Cheque' relates to the Bank account, not Cash in Hand." },
+                    { text: "Dr Purchases $50,000; Cr Cash at Bank $50,000", isCorrect: false, feedback: "Incorrect. 'Purchases' is only used for goods meant for resale (Inventory). A vehicle is a Non-Current Asset." },
+                    { text: "Dr Motor Expenses $50,000; Cr Cash at Bank $50,000", isCorrect: false, feedback: "Incorrect. Buying the asset is not an expense yet. It's a capital expenditure." },
+                    { text: "Dr Motor Vehicles $50,000; Cr Cash at Bank $50,000", isCorrect: true, feedback: "Correct! Asset (MV) increases (Dr), Asset (Bank) decreases (Cr)." }
+                ],
+                hint: "Is a vehicle goods for resale? No. Does cheque affect Cash or Bank?"
+            },
+            {
+                id: 4,
+                title: "The Credit Chamber: Credit Transactions",
+                story: "A laser grid blocks your path. It responds to credit transactions.",
+                question: "Transaction: Sold goods on credit to T. Swift for $2,000.",
+                options: [
+                    { text: "Dr T. Swift (Trade Receivable); Cr Sales", isCorrect: true, feedback: "Excellent. Asset (Debtor) increases, Income (Sales) increases." },
+                    { text: "Dr Cash at Bank; Cr Sales", isCorrect: false, feedback: "Incorrect. 'On credit' means no money was received yet." },
+                    { text: "Dr Sales; Cr T. Swift (Trade Payable)", isCorrect: false, feedback: "Incorrect. Sales is an Income, so it must be Credited to increase." },
+                    { text: "Dr T. Swift (Trade Payable); Cr Inventory", isCorrect: false, feedback: "Incorrect. We do not credit Inventory when selling (unless using perpetual system, but for Double Entry basics, we Credit Sales)." }
+                ],
+                hint: "T. Swift now owes us money. She is a Trade Receivable (Asset). Income is increasing."
+            },
+            {
+                id: 5,
+                title: "The Final Lock: Returns",
+                story: "The exit door is in sight. One final puzzle remains regarding returned goods.",
+                question: "Transaction: Returned damaged goods to supplier, E. Sheeran, $100.",
+                options: [
+                    { text: "Dr Sales Returns; Cr E. Sheeran", isCorrect: false, feedback: "Incorrect. We are returning goods we BOUGHT. This is a Purchase Return." },
+                    { text: "Dr E. Sheeran (Trade Payable); Cr Purchase Returns", isCorrect: true, feedback: "Correct! Liability (E. Sheeran) decreases (Dr), Purchase Returns (Contra-Expense) increases (Cr)." },
+                    { text: "Dr Purchases; Cr E. Sheeran", isCorrect: false, feedback: "Incorrect. This would mean we bought more goods." },
+                    { text: "Dr E. Sheeran; Cr Inventory", isCorrect: false, feedback: "No. In basic Double Entry, we use the specific return account 'Purchase Returns'." }
+                ],
+                hint: "We owe E. Sheeran less money now. Liability decreases on the Debit side."
+            }
+        ];
+
+        // --- COMPONENTS ---
+
+        const IntroScreen = ({ onStart }) => (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 animate-fade-in">
+                <div className="bg-gray-800 p-8 rounded-2xl border-2 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.3)] max-w-2xl">
+                    <div className="text-6xl mb-4 text-yellow-500">
+                        <i className="fa-solid fa-vault"></i>
+                    </div>
+                    <h1 className="text-4xl font-bold text-white mb-2 tracking-wider">LOCKED IN THE LEDGER</h1>
+                    <p className="text-xl text-yellow-500 font-mono mb-6">Subject: Principles of Accounts (Sec 3)</p>
+                    <p className="text-gray-300 mb-8 leading-relaxed">
+                        You are a junior accountant working late. The security system has malfunctioned and locked you inside the vault!
+                        The electronic lock is controlled by the <span className="text-yellow-400 font-bold">Double Entry System</span>.
+                        <br/><br/>
+                        Solve the accounting puzzles to generate the override code and escape.
+                    </p>
+                    <button 
+                        onClick={onStart}
+                        className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-4 px-10 rounded-full text-xl transition transform hover:scale-105 shadow-lg flex items-center justify-center mx-auto gap-3"
+                    >
+                        <i className="fa-solid fa-play"></i> START MISSION
+                    </button>
+                </div>
+            </div>
+        );
+
+        const VictoryScreen = ({ onRestart }) => (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 animate-fade-in">
+                <div className="bg-green-900/40 p-10 rounded-2xl border-4 border-green-500 shadow-[0_0_30px_rgba(34,197,94,0.5)] backdrop-blur-sm max-w-2xl">
+                    <div className="text-7xl mb-6 text-green-400">
+                        <i className="fa-solid fa-unlock-keyhole"></i>
+                    </div>
+                    <h1 className="text-5xl font-bold text-white mb-4">ACCESS GRANTED</h1>
+                    <h2 className="text-2xl text-green-300 font-mono mb-6">VAULT UNLOCKED</h2>
+                    <p className="text-gray-200 text-lg mb-8">
+                        Congratulations! You have demonstrated mastery of the Double Entry System. 
+                        Your accounting records are balanced, and the door is open.
+                    </p>
+                    <button 
+                        onClick={onRestart}
+                        className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg text-lg transition shadow-lg"
+                    >
+                        Play Again
+                    </button>
+                </div>
+            </div>
+        );
+
+        const ProgressBar = ({ current, total }) => {
+            const progress = ((current) / total) * 100;
+            return (
+                <div className="w-full max-w-3xl mx-auto mb-6">
+                    <div className="flex justify-between text-xs text-gray-400 mb-1 font-mono">
+                        <span>START</span>
+                        <span>LEVEL {current + 1} / {total}</span>
+                        <span>ESCAPE</span>
+                    </div>
+                    <div className="h-3 bg-gray-700 rounded-full overflow-hidden border border-gray-600">
+                        <div 
+                            className="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 transition-all duration-500 ease-out"
+                            style={{ width: `${progress}%` }}
+                        ></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GameLevel = ({ levelData, onAnswer, isShaking }) => {
+            const [showHint, setShowHint] = useState(false);
+
+            return (
+                <div className={`w-full max-w-3xl mx-auto ${isShaking ? 'shake' : ''}`}>
+                    <div className="bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
+                        {/* Header */}
+                        <div className="bg-gray-900 p-4 border-b border-gray-700 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                                <h2 className="text-lg font-mono text-yellow-500 uppercase tracking-widest">{levelData.title}</h2>
+                            </div>
+                            <i className="fa-solid fa-lock text-gray-500"></i>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 md:p-8">
+                            <p className="text-gray-400 italic mb-6 border-l-4 border-yellow-600 pl-4 py-1 bg-gray-900/50">
+                                {levelData.story}
+                            </p>
+                            
+                            <h3 className="text-2xl font-bold text-white mb-8 leading-snug">
+                                {levelData.question}
+                            </h3>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                {levelData.options.map((option, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => onAnswer(option)}
+                                        className="text-left p-4 rounded-lg border border-gray-600 bg-gray-700/50 hover:bg-blue-600 hover:border-blue-400 hover:text-white transition-all duration-200 group flex items-start gap-3"
+                                    >
+                                        <div className="bg-gray-800 text-gray-400 group-hover:text-blue-200 w-8 h-8 flex items-center justify-center rounded-md font-mono text-sm shrink-0 mt-0.5">
+                                            {String.fromCharCode(65 + idx)}
+                                        </div>
+                                        <span className="text-lg">{option.text}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer / Hint */}
+                        <div className="bg-gray-900/80 p-4 border-t border-gray-700 flex justify-between items-center">
+                            <button 
+                                onClick={() => setShowHint(!showHint)}
+                                className="text-sm text-yellow-500 hover:text-yellow-300 font-mono flex items-center gap-2"
+                            >
+                                <i className="fa-regular fa-lightbulb"></i>
+                                {showHint ? "HIDE HINT" : "NEED A HINT?"}
+                            </button>
+                            {showHint && (
+                                <span className="text-sm text-gray-300 animate-fade-in bg-yellow-900/30 px-3 py-1 rounded border border-yellow-700/50">
+                                    {levelData.hint}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const FeedbackModal = ({ feedback, isCorrect, onClose }) => (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className={`max-w-md w-full rounded-xl p-6 shadow-2xl border-2 ${isCorrect ? 'bg-gray-800 border-green-500' : 'bg-gray-800 border-red-500'}`}>
+                    <div className="text-center mb-4">
+                        <div className={`text-5xl mb-4 ${isCorrect ? 'text-green-500' : 'text-red-500'}`}>
+                            <i className={isCorrect ? "fa-solid fa-circle-check" : "fa-solid fa-circle-xmark"}></i>
+                        </div>
+                        <h3 className={`text-2xl font-bold ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+                            {isCorrect ? "SYSTEM ACCEPTED" : "ACCESS DENIED"}
+                        </h3>
+                    </div>
+                    <p className="text-gray-200 text-center mb-8 text-lg leading-relaxed">
+                        {feedback}
+                    </p>
+                    <button 
+                        onClick={onClose}
+                        className={`w-full py-3 rounded-lg font-bold text-white transition ${isCorrect ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'}`}
+                    >
+                        {isCorrect ? "PROCEED TO NEXT ROOM" : "TRY AGAIN"}
+                    </button>
+                </div>
+            </div>
+        );
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const [gameState, setGameState] = useState('intro'); // intro, playing, victory
+            const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
+            const [modalData, setModalData] = useState(null); // { isCorrect, feedback }
+            const [isShaking, setIsShaking] = useState(false);
+
+            const startGame = () => {
+                setGameState('playing');
+                setCurrentLevelIndex(0);
+            };
+
+            const handleAnswer = (option) => {
+                if (option.isCorrect) {
+                    // Correct Answer Logic
+                    setModalData({
+                        isCorrect: true,
+                        feedback: option.feedback
+                    });
+                } else {
+                    // Wrong Answer Logic
+                    setIsShaking(true);
+                    setTimeout(() => setIsShaking(false), 500);
+                    setModalData({
+                        isCorrect: false,
+                        feedback: option.feedback
+                    });
+                }
+            };
+
+            const closeModal = () => {
+                if (modalData.isCorrect) {
+                    const nextIndex = currentLevelIndex + 1;
+                    if (nextIndex < gameLevels.length) {
+                        setCurrentLevelIndex(nextIndex);
+                    } else {
+                        setGameState('victory');
+                    }
+                }
+                setModalData(null);
+            };
+
+            return (
+                <div className="min-h-screen relative overflow-hidden flex flex-col">
+                    <div className="scanlines"></div>
+                    
+                    {/* Header Bar */}
+                    <div className="bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center z-20">
+                        <div className="flex items-center gap-2 text-yellow-500">
+                            <i className="fa-solid fa-calculator"></i>
+                            <span className="font-bold tracking-widest hidden sm:inline">POA: ESCAPE THE VAULT</span>
+                        </div>
+                        <div className="text-gray-500 font-mono text-sm">
+                            SEC 3: DOUBLE ENTRY
+                        </div>
+                    </div>
+
+                    {/* Main Content Area */}
+                    <main className="flex-grow flex flex-col items-center justify-center p-4 z-20 overflow-y-auto">
+                        {gameState === 'intro' && (
+                            <IntroScreen onStart={startGame} />
+                        )}
+
+                        {gameState === 'playing' && (
+                            <>
+                                <ProgressBar current={currentLevelIndex} total={gameLevels.length} />
+                                <GameLevel 
+                                    levelData={gameLevels[currentLevelIndex]} 
+                                    onAnswer={handleAnswer}
+                                    isShaking={isShaking}
+                                />
+                            </>
+                        )}
+
+                        {gameState === 'victory' && (
+                            <VictoryScreen onRestart={startGame} /><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Accountant's Vault: Double Entry Escape</title>
+    
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Roboto:wght@300;400;700&display=swap');
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #111827; /* Gray 900 */
+            color: #e5e7eb; /* Gray 200 */
+        }
+        
+        .mono-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Animation for shaking on wrong answer */
+        .shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+
+        /* Scanline effect for "Screen" feel */
+        .scanlines {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.1) 50%,
+                rgba(0,0,0,0.1)
+            );
+            background-size: 100% 4px;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- GAME DATA ---
+        // This is the content you can edit to change questions
+        const gameLevels = [
+            {
+                id: 1,
+                title: "Security Clearance: Classification",
+                story: "You are trapped in the Chief Financial Officer's office. To power up the door release, you must correctly classify the nature of these accounts. The system only accepts the truth.",
+                question: "Which of the following accounts is classified as a LIABILITY?",
+                options: [
+                    { text: "Inventory", isCorrect: false, feedback: "Incorrect. Inventory is an Asset (Current Asset)." },
+                    { text: "Bank Overdraft", isCorrect: true, feedback: "Correct! You owe money to the bank." },
+                    { text: "Sales Revenue", isCorrect: false, feedback: "Incorrect. Sales is an Income account." },
+                    { text: "Drawings", isCorrect: false, feedback: "Incorrect. Drawings is a contra-equity account." }
+                ],
+                hint: "Think about what the business OWES to outsiders."
+            },
+            {
+                id: 2,
+                title: "The Logic Circuit: Golden Rules",
+                story: "The door is powered, but locked. The keypad requires the fundamental law of double entry to proceed.",
+                question: "To INCREASE an Expense account, you must __________ it. To DECREASE an Asset account, you must __________ it.",
+                options: [
+                    { text: "Debit; Debit", isCorrect: false, feedback: "Wrong. Assets increase on the Debit side." },
+                    { text: "Credit; Debit", isCorrect: false, feedback: "Wrong. Expenses increase on the Debit side." },
+                    { text: "Debit; Credit", isCorrect: true, feedback: "Access Granted. Expenses are Debited to increase; Assets are Credited to decrease." },
+                    { text: "Credit; Credit", isCorrect: false, feedback: "Wrong. Check your ALICE acronym." }
+                ],
+                hint: "Remember ALICE. Assets & Expenses follow the same rule. Liabilities, Income & Capital follow the opposite."
+            },
+            {
+                id: 3,
+                title: "Transaction Terminal: Purchase of Assets",
+                story: "You've reached the inner vault. A transaction log is flashing red. It needs to be recorded correctly to clear the error.",
+                question: "Transaction: Bought a motor vehicle for business use by cheque, $50,000.",
+                options: [
+                    { text: "Dr Motor Vehicles $50,000; Cr Cash in Hand $50,000", isCorrect: false, feedback: "Close, but 'Cheque' relates to the Bank account, not Cash in Hand." },
+                    { text: "Dr Purchases $50,000; Cr Cash at Bank $50,000", isCorrect: false, feedback: "Incorrect. 'Purchases' is only used for goods meant for resale (Inventory). A vehicle is a Non-Current Asset." },
+                    { text: "Dr Motor Expenses $50,000; Cr Cash at Bank $50,000", isCorrect: false, feedback: "Incorrect. Buying the asset is not an expense yet. It's a capital expenditure." },
+                    { text: "Dr Motor Vehicles $50,000; Cr Cash at Bank $50,000", isCorrect: true, feedback: "Correct! Asset (MV) increases (Dr), Asset (Bank) decreases (Cr)." }
+                ],
+                hint: "Is a vehicle goods for resale? No. Does cheque affect Cash or Bank?"
+            },
+            {
+                id: 4,
+                title: "The Credit Chamber: Credit Transactions",
+                story: "A laser grid blocks your path. It responds to credit transactions.",
+                question: "Transaction: Sold goods on credit to T. Swift for $2,000.",
+                options: [
+                    { text: "Dr T. Swift (Trade Receivable); Cr Sales", isCorrect: true, feedback: "Excellent. Asset (Debtor) increases, Income (Sales) increases." },
+                    { text: "Dr Cash at Bank; Cr Sales", isCorrect: false, feedback: "Incorrect. 'On credit' means no money was received yet." },
+                    { text: "Dr Sales; Cr T. Swift (Trade Payable)", isCorrect: false, feedback: "Incorrect. Sales is an Income, so it must be Credited to increase." },
+                    { text: "Dr T. Swift (Trade Payable); Cr Inventory", isCorrect: false, feedback: "Incorrect. We do not credit Inventory when selling (unless using perpetual system, but for Double Entry basics, we Credit Sales)." }
+                ],
+                hint: "T. Swift now owes us money. She is a Trade Receivable (Asset). Income is increasing."
+            },
+            {
+                id: 5,
+                title: "The Final Lock: Returns",
+                story: "The exit door is in sight. One final puzzle remains regarding returned goods.",
+                question: "Transaction: Returned damaged goods to supplier, E. Sheeran, $100.",
+                options: [
+                    { text: "Dr Sales Returns; Cr E. Sheeran", isCorrect: false, feedback: "Incorrect. We are returning goods we BOUGHT. This is a Purchase Return." },
+                    { text: "Dr E. Sheeran (Trade Payable); Cr Purchase Returns", isCorrect: true, feedback: "Correct! Liability (E. Sheeran) decreases (Dr), Purchase Returns (Contra-Expense) increases (Cr)." },
+                    { text: "Dr Purchases; Cr E. Sheeran", isCorrect: false, feedback: "Incorrect. This would mean we bought more goods." },
+                    { text: "Dr E. Sheeran; Cr Inventory", isCorrect: false, feedback: "No. In basic Double Entry, we use the specific return account 'Purchase Returns'." }
+                ],
+                hint: "We owe E. Sheeran less money now. Liability decreases on the Debit side."
+            }
+        ];
+
+        // --- COMPONENTS ---
+
+        const IntroScreen = ({ onStart }) => (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 animate-fade-in">
+                <div className="bg-gray-800 p-8 rounded-2xl border-2 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.3)] max-w-2xl">
+                    <div className="text-6xl mb-4 text-yellow-500">
+                        <i className="fa-solid fa-vault"></i>
+                    </div>
+                    <h1 className="text-4xl font-bold text-white mb-2 tracking-wider">LOCKED IN THE LEDGER</h1>
+                    <p className="text-xl text-yellow-500 font-mono mb-6">Subject: Principles of Accounts (Sec 3)</p>
+                    <p className="text-gray-300 mb-8 leading-relaxed">
+                        You are a junior accountant working late. The security system has malfunctioned and locked you inside the vault!
+                        The electronic lock is controlled by the <span className="text-yellow-400 font-bold">Double Entry System</span>.
+                        <br/><br/>
+                        Solve the accounting puzzles to generate the override code and escape.
+                    </p>
+                    <button 
+                        onClick={onStart}
+                        className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-4 px-10 rounded-full text-xl transition transform hover:scale-105 shadow-lg flex items-center justify-center mx-auto gap-3"
+                    >
+                        <i className="fa-solid fa-play"></i> START MISSION
+                    </button>
+                </div>
+            </div>
+        );
+
+        const VictoryScreen = ({ onRestart }) => (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 animate-fade-in">
+                <div className="bg-green-900/40 p-10 rounded-2xl border-4 border-green-500 shadow-[0_0_30px_rgba(34,197,94,0.5)] backdrop-blur-sm max-w-2xl">
+                    <div className="text-7xl mb-6 text-green-400">
+                        <i className="fa-solid fa-unlock-keyhole"></i>
+                    </div>
+                    <h1 className="text-5xl font-bold text-white mb-4">ACCESS GRANTED</h1>
+                    <h2 className="text-2xl text-green-300 font-mono mb-6">VAULT UNLOCKED</h2>
+                    <p className="text-gray-200 text-lg mb-8">
+                        Congratulations! You have demonstrated mastery of the Double Entry System. 
+                        Your accounting records are balanced, and the door is open.
+                    </p>
+                    <button 
+                        onClick={onRestart}
+                        className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg text-lg transition shadow-lg"
+                    >
+                        Play Again
+                    </button>
+                </div>
+            </div>
+        );
+
+        const ProgressBar = ({ current, total }) => {
+            const progress = ((current) / total) * 100;
+            return (
+                <div className="w-full max-w-3xl mx-auto mb-6">
+                    <div className="flex justify-between text-xs text-gray-400 mb-1 font-mono">
+                        <span>START</span>
+                        <span>LEVEL {current + 1} / {total}</span>
+                        <span>ESCAPE</span>
+                    </div>
+                    <div className="h-3 bg-gray-700 rounded-full overflow-hidden border border-gray-600">
+                        <div 
+                            className="h-full bg-gradient-to-r from-yellow-600 to-yellow-400 transition-all duration-500 ease-out"
+                            style={{ width: `${progress}%` }}
+                        ></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const GameLevel = ({ levelData, onAnswer, isShaking }) => {
+            const [showHint, setShowHint] = useState(false);
+
+            return (
+                <div className={`w-full max-w-3xl mx-auto ${isShaking ? 'shake' : ''}`}>
+                    <div className="bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
+                        {/* Header */}
+                        <div className="bg-gray-900 p-4 border-b border-gray-700 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                                <h2 className="text-lg font-mono text-yellow-500 uppercase tracking-widest">{levelData.title}</h2>
+                            </div>
+                            <i className="fa-solid fa-lock text-gray-500"></i>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 md:p-8">
+                            <p className="text-gray-400 italic mb-6 border-l-4 border-yellow-600 pl-4 py-1 bg-gray-900/50">
+                                {levelData.story}
+                            </p>
+                            
+                            <h3 className="text-2xl font-bold text-white mb-8 leading-snug">
+                                {levelData.question}
+                            </h3>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                {levelData.options.map((option, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => onAnswer(option)}
+                                        className="text-left p-4 rounded-lg border border-gray-600 bg-gray-700/50 hover:bg-blue-600 hover:border-blue-400 hover:text-white transition-all duration-200 group flex items-start gap-3"
+                                    >
+                                        <div className="bg-gray-800 text-gray-400 group-hover:text-blue-200 w-8 h-8 flex items-center justify-center rounded-md font-mono text-sm shrink-0 mt-0.5">
+                                            {String.fromCharCode(65 + idx)}
+                                        </div>
+                                        <span className="text-lg">{option.text}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer / Hint */}
+                        <div className="bg-gray-900/80 p-4 border-t border-gray-700 flex justify-between items-center">
+                            <button 
+                                onClick={() => setShowHint(!showHint)}
+                                className="text-sm text-yellow-500 hover:text-yellow-300 font-mono flex items-center gap-2"
+                            >
+                                <i className="fa-regular fa-lightbulb"></i>
+                                {showHint ? "HIDE HINT" : "NEED A HINT?"}
+                            </button>
+                            {showHint && (
+                                <span className="text-sm text-gray-300 animate-fade-in bg-yellow-900/30 px-3 py-1 rounded border border-yellow-700/50">
+                                    {levelData.hint}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const FeedbackModal = ({ feedback, isCorrect, onClose }) => (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className={`max-w-md w-full rounded-xl p-6 shadow-2xl border-2 ${isCorrect ? 'bg-gray-800 border-green-500' : 'bg-gray-800 border-red-500'}`}>
+                    <div className="text-center mb-4">
+                        <div className={`text-5xl mb-4 ${isCorrect ? 'text-green-500' : 'text-red-500'}`}>
+                            <i className={isCorrect ? "fa-solid fa-circle-check" : "fa-solid fa-circle-xmark"}></i>
+                        </div>
+                        <h3 className={`text-2xl font-bold ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+                            {isCorrect ? "SYSTEM ACCEPTED" : "ACCESS DENIED"}
+                        </h3>
+                    </div>
+                    <p className="text-gray-200 text-center mb-8 text-lg leading-relaxed">
+                        {feedback}
+                    </p>
+                    <button 
+                        onClick={onClose}
+                        className={`w-full py-3 rounded-lg font-bold text-white transition ${isCorrect ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'}`}
+                    >
+                        {isCorrect ? "PROCEED TO NEXT ROOM" : "TRY AGAIN"}
+                    </button>
+                </div>
+            </div>
+        );
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const [gameState, setGameState] = useState('intro'); // intro, playing, victory
+            const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
+            const [modalData, setModalData] = useState(null); // { isCorrect, feedback }
+            const [isShaking, setIsShaking] = useState(false);
+
+            const startGame = () => {
+                setGameState('playing');
+                setCurrentLevelIndex(0);
+            };
+
+            const handleAnswer = (option) => {
+                if (option.isCorrect) {
+                    // Correct Answer Logic
+                    setModalData({
+                        isCorrect: true,
+                        feedback: option.feedback
+                    });
+                } else {
+                    // Wrong Answer Logic
+                    setIsShaking(true);
+                    setTimeout(() => setIsShaking(false), 500);
+                    setModalData({
+                        isCorrect: false,
+                        feedback: option.feedback
+                    });
+                }
+            };
+
+            const closeModal = () => {
+                if (modalData.isCorrect) {
+                    const nextIndex = currentLevelIndex + 1;
+                    if (nextIndex < gameLevels.length) {
+                        setCurrentLevelIndex(nextIndex);
+                    } else {
+                        setGameState('victory');
+                    }
+                }
+                setModalData(null);
+            };
+
+            return (
+                <div className="min-h-screen relative overflow-hidden flex flex-col">
+                    <div className="scanlines"></div>
+                    
+                    {/* Header Bar */}
+                    <div className="bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center z-20">
+                        <div className="flex items-center gap-2 text-yellow-500">
+                            <i className="fa-solid fa-calculator"></i>
+                            <span className="font-bold tracking-widest hidden sm:inline">POA: ESCAPE THE VAULT</span>
+                        </div>
+                        <div className="text-gray-500 font-mono text-sm">
+                            SEC 3: DOUBLE ENTRY
+                        </div>
+                    </div>
+
+                    {/* Main Content Area */}
+                    <main className="flex-grow flex flex-col items-center justify-center p-4 z-20 overflow-y-auto">
+                        {gameState === 'intro' && (
+                            <IntroScreen onStart={startGame} />
+                        )}
+
+                        {gameState === 'playing' && (
+                            <>
+                                <ProgressBar current={currentLevelIndex} total={gameLevels.length} />
+                                <GameLevel 
+                                    levelData={gameLevels[currentLevelIndex]} 
+                                    onAnswer={handleAnswer}
+                                    isShaking={isShaking}
+                                />
+                            </>
+                        )}
+
+                        {gameState === 'victory' && (
+                            <VictoryScreen onRestart={startGame} />
+                        )}
+                    </main>
+
+                    {/* Modal Overlay */}
+                    {modalData && (
+                        <FeedbackModal 
+                            isCorrect={modalData.isCorrect} 
+                            feedback={modalData.feedback} 
+                            onClose={closeModal} 
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+                        )}
+                    </main>
+
+                    {/* Modal Overlay */}
+                    {modalData && (
+                        <FeedbackModal 
+                            isCorrect={modalData.isCorrect} 
+                            feedback={modalData.feedback} 
+                            onClose={closeModal} 
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
